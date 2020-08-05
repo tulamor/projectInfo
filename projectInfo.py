@@ -18,10 +18,7 @@ pack = args.pack
 arch = args.arch
 os.environ["SCRAM_ARCH"] = arch
 
-# print localtop
-# print cmd
-# print pack
-# print arch
+
 
 cache = {}
 tools = dict(SETUP = {})
@@ -62,7 +59,7 @@ def process_ORIGIN(data, prod):
     for dir in data["PROD"][prod]["ORIGIN"]:
       tool = data["PROD"][prod]["ORIGIN"][dir]
     str += os.path.join(tool, dir)
-  print str
+  print(str)
 
 
 def process_USED_BY(data, pack):
@@ -72,7 +69,7 @@ def process_USED_BY(data, pack):
     for d in data["DEPS"][pack]["USED_BY"]:
       packs.append(os.path.join(data["DEPS"][d]["TYPE"],d))
     str += " ".join(sorted(packs))
-  print str
+  print(str)
 
 
 def process_USES(data, pack):
@@ -87,22 +84,30 @@ def process_USES(data, pack):
 def updateSCRAMTool(tool, base, data):
   file = os.path.join(base, ".SCRAM", arch, "ProjectCache.%s" % cacheext)
   c = data2json(file)
-  if not [file] in data["FILES"]: data["FILES"][file] = {}
+  # print(file)
+  # if not file in data["FILES"]: data["FILES"][file] = {}
   data["FILES"][file] = 1
   for dir in c["BUILDTREE"]:
     dc = c["BUILDTREE"][dir]
-    if ("RAWDATA" in dc) & ("DEPENDENCIES" in dc):
+    # print(dc)
+    if ("RAWDATA" in dc) and ("DEPENDENCIES" in dc["RAWDATA"]):
         _class = dc["CLASS"]
         prod = None
         if re.search(r'^(LIBRARY|CLASSLIB|SEAL_PLATFORM)$', _class):
           dir = dc["PARENT"]
           prod = dc["NAME"]
+        if dir not in data["DATA"]: data["DATA"][dir] = {}
+        if "USES" not in data["DATA"][dir]: data["DATA"][dir]["USES"] = {}
         data["DATA"][dir]["USES"] = {}
         data["DATA"][dir]["TYPE"] = tool
         dc = dc["RAWDATA"]["DEPENDENCIES"]
         for d in dc:
           data["DATA"][dir]["USES"][FixToolName(d)] = 1
-        if prod: data["PROD"][prod]["ORIGIN"][dir] = tool
+        if prod: 
+          if prod not in data["PROD"]: data["PROD"][prod] = {}
+          if "ORIGIN" not in data["PROD"][prod]: data["PROD"][prod]["ORIGIN"] = {}
+          if dir not in data["PROD"][prod]["ORIGIN"]: data["PROD"][prod]["ORIGIN"][dir] = {} 
+          data["PROD"][prod]["ORIGIN"][dir] = tool
         else:
           dc = c["BUILDTREE"][dir]["RAWDATA"]
           if "BUILDPRODUCTS" in dc["content"]:
@@ -110,6 +115,9 @@ def updateSCRAMTool(tool, base, data):
             for type in ("LIBRARY", "BIN"):
               if type in dc:
                 for prod in dc[type]:
+                  if prod not in data["PROD"]: data["PROD"][prod] = {}
+                  if "ORIGIN" not in data["PROD"][prod]: data["PROD"][prod]["ORIGIN"] = {}
+                  if dir not in data["PROD"][prod]["ORIGIN"]: data["PROD"][prod]["ORIGIN"][dir] = {} 
                   data["PROD"][prod]["ORIGIN"][dir] = tool
 
 
@@ -118,25 +126,31 @@ def updateDeps(data, pack=None):
     for d in data["DATA"]: updateDeps(data, d)
     return 0
   if pack in data["DEPS"]: return 0
+  if pack not in data["DEPS"]: data["DEPS"][pack] = {}
+  if "USES" not in data["DEPS"][pack]: data["DEPS"][pack]["USES"] = {}
   data["DEPS"][pack]["USES"] = {}
   data["DEPS"][pack]["USED_BY"] = {}
   data["DEPS"][pack]["TYPE"] = data["DATA"][pack]["TYPE"]
   for u in data["DATA"][pack]["USES"]:
     if u in data["DATA"]: updateDeps(data, u)
     data["DEPS"][pack]["USES"][u] = 1
+    if u not in data["DEPS"]: data["DEPS"][u] = {}
+    if "USED_BY" not in data["DEPS"][u]: data["DEPS"][u]["USED_BY"] = {}
     data["DEPS"][u]["USED_BY"][pack] = 1
+    if "USES" not in data["DEPS"][u]: data["DEPS"][u]["USES"] = {}
     for d in data["DEPS"][u]["USES"]:
       data["DEPS"][pack]["USES"][d] = 1
       data["DEPS"][d]["USED_BY"][pack] = 1
 
 
 def updateExternals():
-  data = {}
+  # data = {}
   tfile = os.path.join(localtop, ".SCRAM", arch, "ToolCache.%s" % cacheext)
   tools = data2json(tfile)
   if tfile not in data["FILES"]: data["FILES"][tfile] = {}
   data["FILES"][tfile] = 1
   for t in tools["SETUP"]:
+    # print("t = %s" % t)
     file = os.path.join(localtop, ".SCRAM", arch, "timestamps", t)
     if not os.path.exists(file): print("No such file: %s" % file) & sys.exit(1)
     if file not in data["FILES"]: data["FILES"][file] = 1
@@ -144,20 +158,32 @@ def updateExternals():
     if "USES" not in data["DATA"][t]: data["DATA"][t]["USES"] = {}
     if "TYPE" not in data["DATA"][t]: data["DATA"][t]["TYPE"] = "tool"
     tc = tools["SETUP"][t]
+    # print("tc = %s" % tc)
     if "USE" in tc:
       for d in tc["USE"]:
         data["DATA"][t]["USES"][FixToolName(d)] = 1
     if "LIB" in tc:
       for l in tc["LIB"]:
+        if l not in data["PROD"]: data["PROD"][l] = {}
+        if "ORIGIN" not in data["PROD"][l]: data["PROD"][l]["ORIGIN"] = {}
+        if t not in data["PROD"][l]["ORIGIN"]: data["PROD"][l]["ORIGIN"][t] = {}
         data["PROD"][l]["ORIGIN"][t] = "tool"
   order_path = os.path.join(localtop, ".SCRAM", arch, "MakeData", "Tools", "SCRAMBased", "order")
   if os.path.exists(order_path):
-    for t in check_output('sort -r %s' % order_path, shell=True).decode().rstrip():
+    for t in check_output('sort -r %s' % order_path, shell=True).decode().rstrip().splitlines():
+      # print("t = %s" % t)
       t = re.sub(r'^\d+:', r'', t)
+      # print("t = %s" % t)
       base = ""
-      if t == "self": base = reltop
-      else: base = "%s_BASE" % t.upper()
-      base = tools["SETUP"][t][base]
+      if t == "self": 
+        base = reltop
+        # print("t = %s" % t)
+        # print("base = %s" % base)
+      else: 
+        # print("t = %s" % t)
+        # print("base = %s" % base)
+        base = "%s_BASE" % t.upper()
+        base = tools["SETUP"][t][base]
       updateSCRAMTool(t, base, data)
   updateSCRAMTool("self", localtop, data)
   updateDeps(data)
@@ -184,4 +210,14 @@ if os.path.exists(cfile):
 if not cache:
   cache = updateExternals()
 
-for pk in pack.split(":"): eval("process_%s(%s, %s)" % (cmd, cache, pk))
+# print("========")
+# print("localtop = %s") % localtop
+# print("cmd      = %s") % cmd
+# print("pack     = %s") % pack
+# print("arch     = %s") % arch
+# print("========")
+
+# for pk in pack.split(":"): eval("process_%s(%s, %s)" % (cmd, cache, pk))
+
+func = globals()["process_" + cmd]
+for pk in pack.split(":"): func(cache, pk)
