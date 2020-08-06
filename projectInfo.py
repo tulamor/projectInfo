@@ -1,8 +1,8 @@
 #!/usr/bin/env python
+import os, sys, re, gzip, json
 from argparse import ArgumentParser
-import os, sys, re, gzip
-from subprocess import  call, check_output
-import json
+from subprocess import  check_output
+from pprint import pprint
 
 help_text = "%s <localtop> <USES|USED_BY|ORIGIN> <tool|package> [<arch>]" % sys.argv[0]
 parser = ArgumentParser(usage=help_text)
@@ -17,12 +17,10 @@ if not re.search(r'^(USES|USED_BY|ORIGIN)$', cmd): parser.print_usage() & sys.ex
 pack = args.pack
 arch = args.arch
 os.environ["SCRAM_ARCH"] = arch
-
-
-
 cache = {}
-tools = dict(SETUP = {})
+tools = {}
 data = dict(DATA = {}, FILES = {}, PROD = {}, DEPS = {})
+
 
 def scramVersion(dir):
   ver = ""
@@ -50,11 +48,14 @@ def data2json(infile):
 
 def FixToolName(t):
   lct = t.lower()
-  if lct in tools["SETUP"]: return lct
+  if lct in tools["SETUP"]: 
+    return lct
   return t
+
 
 def process_ORIGIN(data, prod):
   str = "%s_ORIGIN = " % prod
+  if prod not in data["PROD"]: data["PROD"][prod] = {}
   if "ORIGIN" in data["PROD"][prod]:
     for dir in data["PROD"][prod]["ORIGIN"]:
       tool = data["PROD"][prod]["ORIGIN"][dir]
@@ -75,21 +76,19 @@ def process_USED_BY(data, pack):
 def process_USES(data, pack):
   packs = []
   str = "%s_USES = " % pack
-  if "USES" in data["DATA"][pack]:
-    for d in data["DATA"][pack]["USES"]:
+  if "USES" in data["DEPS"][pack]:
+    for d in data["DEPS"][pack]["USES"]:
       packs.append(os.path.join(data["DEPS"][d]["TYPE"],d))
     str += " ".join(sorted(packs))
   print(str)
 
+
 def updateSCRAMTool(tool, base, data):
   file = os.path.join(base, ".SCRAM", arch, "ProjectCache.%s" % cacheext)
   c = data2json(file)
-  # print(file)
-  # if not file in data["FILES"]: data["FILES"][file] = {}
   data["FILES"][file] = 1
   for dir in c["BUILDTREE"]:
     dc = c["BUILDTREE"][dir]
-    # print(dc)
     if ("RAWDATA" in dc) and ("DEPENDENCIES" in dc["RAWDATA"]):
         _class = dc["CLASS"]
         prod = None
@@ -144,13 +143,12 @@ def updateDeps(data, pack=None):
 
 
 def updateExternals():
-  # data = {}
   tfile = os.path.join(localtop, ".SCRAM", arch, "ToolCache.%s" % cacheext)
+  global tools
   tools = data2json(tfile)
   if tfile not in data["FILES"]: data["FILES"][tfile] = {}
   data["FILES"][tfile] = 1
   for t in tools["SETUP"]:
-    # print("t = %s" % t)
     file = os.path.join(localtop, ".SCRAM", arch, "timestamps", t)
     if not os.path.exists(file): print("No such file: %s" % file) & sys.exit(1)
     if file not in data["FILES"]: data["FILES"][file] = 1
@@ -158,7 +156,6 @@ def updateExternals():
     if "USES" not in data["DATA"][t]: data["DATA"][t]["USES"] = {}
     if "TYPE" not in data["DATA"][t]: data["DATA"][t]["TYPE"] = "tool"
     tc = tools["SETUP"][t]
-    # print("tc = %s" % tc)
     if "USE" in tc:
       for d in tc["USE"]:
         data["DATA"][t]["USES"][FixToolName(d)] = 1
@@ -171,17 +168,11 @@ def updateExternals():
   order_path = os.path.join(localtop, ".SCRAM", arch, "MakeData", "Tools", "SCRAMBased", "order")
   if os.path.exists(order_path):
     for t in check_output('sort -r %s' % order_path, shell=True).decode().rstrip().splitlines():
-      # print("t = %s" % t)
       t = re.sub(r'^\d+:', r'', t)
-      # print("t = %s" % t)
       base = ""
       if t == "self": 
         base = reltop
-        # print("t = %s" % t)
-        # print("base = %s" % base)
       else: 
-        # print("t = %s" % t)
-        # print("base = %s" % base)
         base = "%s_BASE" % t.upper()
         base = tools["SETUP"][t][base]
       updateSCRAMTool(t, base, data)
@@ -209,15 +200,6 @@ if os.path.exists(cfile):
     break
 if not cache:
   cache = updateExternals()
-
-# print("========")
-# print("localtop = %s") % localtop
-# print("cmd      = %s") % cmd
-# print("pack     = %s") % pack
-# print("arch     = %s") % arch
-# print("========")
-
-# for pk in pack.split(":"): eval("process_%s(%s, %s)" % (cmd, cache, pk))
 
 func = globals()["process_" + cmd]
 for pk in pack.split(":"): func(cache, pk)
